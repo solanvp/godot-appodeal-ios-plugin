@@ -1,0 +1,4 @@
+plugin/bin/*
+*.d
+*.o
+.dblite

@@ -1,0 +1,17 @@
+[config]
+name="Appodealplugin"
+binary="appodealplugin.a"
+
+initialization="register_appodealplugin_types"
+deinitialization="unregister_appodealplugin_types"
+
+[dependencies]
+linked=[]
+embedded=[]
+system=[]
+
+capabilities=[]
+
+files=[]
+
+[plist]
