@@ -25,7 +25,11 @@ opts.Add(BoolVariable('simulator', "Compilation platform", 'no'))
 opts.Add(BoolVariable('use_llvm', "Use the LLVM / Clang compiler", 'no'))
 opts.Add(PathVariable('target_path', 'The path where the lib is installed.', 'bin/'))
 opts.Add(EnumVariable('plugin', 'Plugin to build', '', ['', 'appodealplugin']))
-opts.Add(EnumVariable('version', 'Godot version to target', '', ['', '3.x', '4.0']))
+opts.Add(EnumVariable('version', 'Godot version to target', '4.0', ['4.0'])) # Removed 3.x option, set default to 4.0
+
+# Corrected: AddOption is now called directly, not through opts.Add
+AddOption('--appodeal-xcframework-path', help='Path to the Appodeal.xcframework folder', default='')
+
 
 # Updates the environment with the option variables.
 opts.Update(env)
@@ -45,10 +49,6 @@ if env['arch'] == '':
 
 if env['plugin'] == '':
     print("No valid plugin selected.")
-    quit();
-
-if env['version'] == '':
-    print("No valid Godot version selected.")
     quit();
 
 # For the reference:
@@ -98,101 +98,143 @@ env.Append(LINKFLAGS=["-arch", env['arch'], '-isysroot', sdk_path, '-F' + sdk_pa
 if env['arch'] == 'armv7':
     env.Prepend(CXXFLAGS=['-fno-aligned-allocation'])
 
-if env['version'] == '3.x':
-    # Removed "$IPHONESDK" as it's not defined and likely redundant with -isysroot
-    env.Prepend(CXXFLAGS=['-DIPHONE_ENABLED'])
-    env.Prepend(CXXFLAGS=['-DVERSION_3_X'])
+# Godot 4.0 specific flags
+env.Prepend(CXXFLAGS=['-DIOS_ENABLED'])
+env.Prepend(CXXFLAGS=['-DVERSION_4_0'])
 
-    env.Prepend(CFLAGS=['-std=gnu11']) # Keep for Godot 3.x if it's pure C
-    env.Prepend(CXXFLAGS=['-DGLES_ENABLED', '-std=gnu++14'])
+env.Append(CCFLAGS=['-std=gnu++17']) # Moved to CCFLAGS for broader application
+env.Prepend(CXXFLAGS=['-DVULKAN_ENABLED']) # Keep other CXXFLAGS
+env.Append(CCFLAGS=['-x', 'objective-c++']) # Explicitly tell clang to treat .m files as Objective-C++
 
-    if env['target'] == 'debug':
-        env.Prepend(CXXFLAGS=[
-            '-gdwarf-2', '-O0',
-            '-DDEBUG_MEMORY_ALLOC', '-DDISABLE_FORCED_INLINE',
-            '-D_DEBUG', '-DDEBUG=1', '-DDEBUG_ENABLED',
-            '-DPTRCALL_ENABLED',
-        ])
-    elif env['target'] == 'release_debug':
-        env.Prepend(CXXFLAGS=['-O2', '-ftree-vectorize',
-            '-DNDEBUG', '-DNS_BLOCK_ASSERTIONS=1', '-DDEBUG_ENABLED',
-            '-DPTRCALL_ENABLED',
-        ])
+if env['target'] == 'debug':
+    env.Prepend(CXXFLAGS=[
+        '-gdwarf-2', '-O0',
+        '-DDEBUG_MEMORY_ALLOC', '-DDISABLE_FORCED_INLINE',
+        '-D_DEBUG', '-DDEBUG=1', '-DDEBUG_ENABLED',
+    ])
+elif env['target'] == 'release_debug':
+    env.Prepend(CXXFLAGS=[
+        '-O2', '-ftree-vectorize',
+        '-DNDEBUG', '-DNS_BLOCK_ASSERTIONS=1', '-DDEBUG_ENABLED',
+    ])
 
-        if env['arch'] != 'armv7':
-            env.Prepend(CXXFLAGS=['-fomit-frame-pointer'])
+    if env['arch'] != 'armv7':
+        env.Prepend(CXXFLAGS=['-fomit-frame-pointer'])
+else: # release
+    env.Prepend(CXXFLAGS=[
+        '-O2', '-ftree-vectorize',
+        '-DNDEBUG', '-DNS_BLOCK_ASSERTIONS=1',
+    ])
+
+    if env['arch'] != 'armv7':
+        env.Prepend(CXXFLAGS=['-fomit-frame-pointer'])
+
+# Adding header files for Godot's core (Godot 4.0 specific)
+env.Append(CPPPATH=[
+    '.',
+    'godot', # Assuming godot source is here
+    'godot/platform/ios',
+    os.path.join(sdk_path, 'usr', 'include'), # General system headers
+    os.path.join(sdk_path, 'usr', 'include', 'c++', 'v1') # libc++ specific headers
+])
+
+# --- START OF LOCAL APPODEAL SDK INTEGRATION ---
+# Retrieve the value of the option
+appodeal_xcframework_path = env.GetOption('appodeal_xcframework_path')
+
+# Check if appodeal_xcframework_path is provided and exists before using it
+if appodeal_xcframework_path:
+    appodeal_xcframework_root = appodeal_xcframework_path
+    
+    # Determine platform-specific framework path within xcframework
+    platform_subdir = ""
+    if env['simulator']:
+        if env['arch'] == 'x86_64':
+            platform_subdir = "ios-x86_64-simulator"
+        elif env['arch'] == 'arm64':
+            platform_subdir = "ios-arm64-simulator"
+        else:
+            print(f"Error: Unsupported simulator architecture for Appodeal XCFramework: {env['arch']}")
+            quit()
+    else: # Device build
+        platform_subdir = f"ios-{env['arch']}"
+
+    appodeal_framework_path = os.path.join(appodeal_xcframework_root, platform_subdir, "Appodeal.framework")
+    
+    # Add the *parent directory* of Appodeal.framework to LINKFLAGS (-F)
+    appodeal_framework_search_path = os.path.dirname(appodeal_framework_path)
+    if os.path.exists(appodeal_framework_search_path):
+        env.Append(LINKFLAGS=[f"-F{appodeal_framework_search_path}"])
+        env.Append(CCFLAGS=[f"-F{appodeal_framework_search_path}"])
+        print(f"Added Appodeal Framework search path (-F): {appodeal_framework_search_path}")
+        
+        # Add the Headers directory to the include path
+        appodeal_headers_path = os.path.join(appodeal_framework_path, "Headers")
+        if os.path.exists(appodeal_headers_path):
+            env.Append(CPPPATH=[appodeal_headers_path])
+            print(f"Added Appodeal Headers path: {appodeal_headers_path}")
+        else:
+            print(f"Warning: Appodeal Headers path not found: {appodeal_headers_path}")
     else:
-        env.Prepend(CXXFLAGS=[
-            '-O2', '-ftree-vectorize',
-            '-DNDEBUG', '-DNS_BLOCK_ASSERTIONS=1',
-            '-DPTRCALL_ENABLED',
-        ])
+        print(f"Error: Appodeal Framework search path not found: {appodeal_framework_search_path}. Check your '--appodeal-xcframework-path' and 'arch'/'simulator' settings.")
+        quit()
 
-        if env['arch'] != 'armv7':
-            env.Prepend(CXXFLAGS=['-fomit-frame-pointer'])
-elif env['version'] == '4.0':
-    # Removed "$IOS_SDK_PATH" as it's not defined and likely redundant with -isysroot
-    env.Prepend(CXXFLAGS=['-DIOS_ENABLED'])
-    env.Prepend(CXXFLAGS=['-DVERSION_4_0'])
+    # Add the framework itself to LINKFLAGS (-framework)
+    env.Append(LINKFLAGS=["-framework", "Appodeal"])
+    print("Added -framework Appodeal")
 
-    # Removed: env.Prepend(CFLAGS=['-std=gnu11']) to avoid conflict with Objective-C++
-    # Key Change: Moved -std=gnu++17 from CXXFLAGS to CCFLAGS for broader application
-    env.Append(CCFLAGS=['-std=gnu++17'])
-    env.Prepend(CXXFLAGS=['-DVULKAN_ENABLED']) # Keep other CXXFLAGS
-    # Key Change: Explicitly tell clang to treat .m files as Objective-C++
-    env.Append(CCFLAGS=['-x', 'objective-c++'])
+    # You might also need to link against other system frameworks that Appodeal depends on.
+    # Common ones include:
+    env.Append(LINKFLAGS=[
+        "-framework", "AdSupport",
+        "-framework", "CoreGraphics",
+        "-framework", "CoreTelephony",
+        "-framework", "CoreMotion",
+        "-framework", "Foundation",
+        "-framework", "UIKit",
+        "-framework", "WebKit",
+        "-framework", "StoreKit",
+        "-framework", "SystemConfiguration",
+        "-framework", "AVFoundation",
+        "-framework", "AudioToolbox",
+        "-framework", "CoreMedia",
+        "-framework", "CoreLocation",
+        "-framework", "SafariServices",
+        "-framework", "MessageUI",
+        "-framework", "MobileCoreServices", # Deprecated in newer iOS, but might be needed for older SDKs
+        "-framework", "ImageIO",
+        "-framework", "QuartzCore",
+        "-framework", "Security",
+        "-framework", "JavaScriptCore",
+        "-framework", "EventKit",
+        "-framework", "EventKitUI",
+        "-framework", "GameKit",
+        "-framework", "iAd", # Deprecated, but some older SDKs might still reference
+        "-framework", "MediaPlayer", # Deprecated
+        "-framework", "UserNotifications",
+        "-framework", "AppTrackingTransparency", # Crucial for iOS 14+
+        "-lsqlite3", # Often a dependency for SDKs
+        "-lc++", # Ensure C++ standard library is linked
+        "-lz", # Zlib compression library
+        "-ObjC", # Crucial for Objective-C categories to be linked
+    ])
+    print("Added common Appodeal system framework dependencies.")
 
-    if env['target'] == 'debug':
-        env.Prepend(CXXFLAGS=[
-            '-gdwarf-2', '-O0',
-            '-DDEBUG_MEMORY_ALLOC', '-DDISABLE_FORCED_INLINE',
-            '-D_DEBUG', '-DDEBUG=1', '-DDEBUG_ENABLED',
-        ])
-    elif env['target'] == 'release_debug':
-        env.Prepend(CXXFLAGS=[
-            '-O2', '-ftree-vectorize',
-            '-DNDEBUG', '-DNS_BLOCK_ASSERTIONS=1', '-DDEBUG_ENABLED',
-        ])
-
-        if env['arch'] != 'armv7':
-            env.Prepend(CXXFLAGS=['-fomit-frame-pointer'])
-    else:
-        env.Prepend(CXXFLAGS=[
-            '-O2', '-ftree-vectorize',
-            '-DNDEBUG', '-DNS_BLOCK_ASSERTIONS=1',
-        ])
-
-        if env['arch'] != 'armv7':
-            env.Prepend(CXXFLAGS=['-fomit-frame-pointer'])
 else:
-    print("No valid version to set flags for.")
-    quit();
+    print("No '--appodeal-xcframework-path' provided. Skipping local Appodeal SDK integration.")
 
-# Adding header files
-if env['version'] == '3.x':
-    env.Append(CPPPATH=[
-        '.',
-        'godot',
-        'godot/platform/iphone',
-    ])
-else: # version == '4.0'
-       env.Append(CPPPATH=[
-        '.',
-        'godot',
-        'godot/platform/ios',
-        os.path.join(sdk_path, 'usr', 'include'), # General system headers
-        os.path.join(sdk_path, 'usr', 'include', 'c++', 'v1') # libc++ specific headers
-    ])
+# --- END OF LOCAL APPODEAL SDK INTEGRATION ---
+
 
 # tweak this if you want to use different folders, or more folders, to store your source code in.
-sources = Glob('appodealplugin/*.cpp')
-sources.append(Glob('appodealplugin/*.mm'))
-sources.append(Glob('appodealplugin/*.m'))
+sources = Glob(env['plugin'] + '/*.cpp')
+sources.append(Glob(env['plugin'] + '/*.mm'))
+sources.append(Glob(env['plugin'] + '/*.m'))
 
-library_platform = env["arch"] + "-" + ("simulator" if env["simulator"] else "iphone")
+# lib<plugin>.<arch>-<simulator|ios>.<release|debug|release_debug>.a
+library_platform = env["arch"] + "-" + ("simulator" if env["simulator"] else "iphone") # Changed from "ios" to "iphone" for consistency with Godot's export templates
 library_name = env['plugin'] + "." + library_platform + "." + env["target"] + ".a"
 library = env.StaticLibrary(target=env['target_path'] + library_name, source=sources)
-
 
 Default(library)
 

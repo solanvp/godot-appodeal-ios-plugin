@@ -6,6 +6,7 @@
 //
 
 #import <Foundation/Foundation.h>
+@import Appodeal;
 
 #include "core/object/class_db.h"
 
@@ -32,29 +33,14 @@ Appodealplugin *Appodealplugin::get_singleton() {
 }
 
 void Appodealplugin::_bind_methods() {
-    ADD_SIGNAL(MethodInfo("multiply_result", PropertyInfo(Variant::STRING, "result")));
+    ADD_SIGNAL(MethodInfo("signal_test", PropertyInfo(Variant::STRING, "result")));
     
-    ClassDB::bind_method("add", &Appodealplugin::add);
-    ClassDB::bind_method("sub", &Appodealplugin::sub);
-    ClassDB::bind_method("multiply", &Appodealplugin::multiply);
+    ClassDB::bind_method("check_appodeal", &Appodealplugin::check_appodeal);
 }
 
-int Appodealplugin::add() {
-    int num1 = 5;
-    int num2 = 10;
-    
-    int result = num1 + num2;
-    NSLog(@"Result of adition: %d", result);
-    
-    return result;
-}
-
-int Appodealplugin::sub(int num1, int num2) {
-    int result = num1 - num2;
-    NSLog(@"Result of substraction: %d", result);
-    return result;
-}
-
-void Appodealplugin::multiply() {
-    emit_signal("multiply_result", "Hello from Appodealplugin");
+void Appodealplugin::check_appodeal() {
+    NSLog(@"Appodeal check");
+    NSString *sdkVersion = [Appodeal getVersion];
+    NSLog(@"Appodeal check: %@", sdkVersion);
+    emit_signal("signal_test", "Hello from Appodealplugin");
 }

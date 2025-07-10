@@ -17,9 +17,7 @@ class Appodealplugin: public Object {
     static Appodealplugin *instance;
 
 public:
-    int add();
-    int sub(int num1, int num2);
-    void multiply();
+    void check_appodeal();
     static Appodealplugin *get_singleton();
     
     Appodealplugin();
