@@ -23,7 +23,7 @@ This is only the first step towards integrating the Appodeal SDK to Godot 4.4, l
     scons target=release_debug arch=arm64 plugin=appodealplugin --appodeal-xcframework-path=./sdk/Appodeal.xcframework
 ```
 
-4. Place appodealplugin.gdip (support_files) and the output .a file under /ios/plugins of your main Godot game. Rename the .a file to appodealplugin.a
+4. Copy appodealplugin.gdip (support_files folder) and the output .a file (bin folder) to `/ios/plugins` of your main Godot game. Rename the .a file to appodealplugin.a
 
 5. Add the following gdscript snippet on your game:
 ```
