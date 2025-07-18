@@ -286,7 +286,7 @@ void Appodealplugin::show_banner() {
     }
     
     NSLog(@"Showing banner ad");
-    BOOL success = [Appodeal showAd:AppodealShowStyleBannerTop rootViewController:(UIViewController *)[AppDelegate viewController]];
+    BOOL success = [Appodeal showAd:AppodealShowStyleBannerBottom rootViewController:(UIViewController *)[AppDelegate viewController]];
     
     if (success) {
         banner_shown = true;
