@@ -15,6 +15,60 @@
 
 #include "appodealplugin.h"
 
+@interface AppodealRewardedDelegateBridge : NSObject <AppodealRewardedVideoDelegate>
+@end
+
+@implementation AppodealRewardedDelegateBridge
+
+- (void)rewardedVideoDidLoadAdIsPrecache:(BOOL)precache {
+    NSLog(@"Rewarded video loaded, precache: %@", precache ? @"YES" : @"NO");
+    // No signal needed for load success, just log
+}
+
+- (void)rewardedVideoDidFailToLoadAd {
+    NSLog(@"Rewarded video failed to load");
+    if (Appodealplugin::get_singleton()) {
+        Appodealplugin::get_singleton()->emit_signal("rewarded_failed", false);
+    }
+}
+
+- (void)rewardedVideoDidFailToPresentWithError:(NSError *)error {
+    NSLog(@"Rewarded video failed to present with error: %@", error);
+    if (Appodealplugin::get_singleton()) {
+        Appodealplugin::get_singleton()->emit_signal("rewarded_failed", false);
+    }
+}
+
+- (void)rewardedVideoDidPresent {
+    NSLog(@"Rewarded video presented");
+    if (Appodealplugin::get_singleton()) {
+        Appodealplugin::get_singleton()->emit_signal("rewarded_shown", true);
+    }
+}
+
+- (void)rewardedVideoDidDismiss {
+    NSLog(@"Rewarded video dismissed");
+    if (Appodealplugin::get_singleton()) {
+        Appodealplugin::get_singleton()->emit_signal("rewarded_closed", true);
+    }
+}
+
+- (void)rewardedVideoDidFinish:(float)rewardAmount name:(NSString *)rewardName {
+    NSLog(@"Rewarded video finished - Reward: %@, Amount: %.2f", rewardName, rewardAmount);
+    if (Appodealplugin::get_singleton()) {
+        Appodealplugin::get_singleton()->emit_signal("rewarded_finished", true);
+    }
+}
+
+- (void)rewardedVideoDidClick {
+    NSLog(@"Rewarded video clicked");
+    if (Appodealplugin::get_singleton()) {
+        Appodealplugin::get_singleton()->emit_signal("rewarded_clicked", true);
+    }
+}
+
+@end
+
 Appodealplugin *Appodealplugin::instance = NULL;
 
 Appodealplugin::Appodealplugin() {
@@ -22,13 +76,17 @@ Appodealplugin::Appodealplugin() {
     initialized = false;
     banner_loaded = false;
     banner_shown = false;
+    rewarded_delegate_bridge = [[AppodealRewardedDelegateBridge alloc] init];
     NSLog(@"initialize appodealplugin");
+    [Appodeal setRewardedVideoDelegate:rewarded_delegate_bridge];
 }
 
 Appodealplugin::~Appodealplugin() {
     if (instance == this) {
         instance = NULL;
     }
+    // ARC handles memory management automatically, no need for release
+    rewarded_delegate_bridge = nullptr;
     NSLog(@"deinitialize appodealplugin");
 }
 
@@ -40,8 +98,20 @@ void Appodealplugin::_bind_methods() {
     ADD_SIGNAL(MethodInfo("signal_test", PropertyInfo(Variant::STRING, "result")));
     ADD_SIGNAL(MethodInfo("appodeal_initialized", PropertyInfo(Variant::BOOL, "success")));
     ADD_SIGNAL(MethodInfo("event_logged", PropertyInfo(Variant::STRING, "event_name")));
+    
     ADD_SIGNAL(MethodInfo("banner_shown", PropertyInfo(Variant::BOOL, "success")));
     ADD_SIGNAL(MethodInfo("banner_hidden", PropertyInfo(Variant::BOOL, "success")));
+    // Interstitial ad signals
+    ADD_SIGNAL(MethodInfo("interstitial_shown", PropertyInfo(Variant::BOOL, "success")));
+    ADD_SIGNAL(MethodInfo("interstitial_closed", PropertyInfo(Variant::BOOL, "success")));
+    ADD_SIGNAL(MethodInfo("interstitial_failed", PropertyInfo(Variant::BOOL, "success")));
+    ADD_SIGNAL(MethodInfo("interstitial_clicked", PropertyInfo(Variant::BOOL, "success"))); // Optional, if supported
+    // Rewarded ad signals
+    ADD_SIGNAL(MethodInfo("rewarded_shown", PropertyInfo(Variant::BOOL, "success")));
+    ADD_SIGNAL(MethodInfo("rewarded_closed", PropertyInfo(Variant::BOOL, "success")));
+    ADD_SIGNAL(MethodInfo("rewarded_failed", PropertyInfo(Variant::BOOL, "success")));
+    ADD_SIGNAL(MethodInfo("rewarded_clicked", PropertyInfo(Variant::BOOL, "success"))); // Optional, if supported
+    ADD_SIGNAL(MethodInfo("rewarded_finished", PropertyInfo(Variant::BOOL, "success"))); // User earned reward
     
     // Initialization methods
     ClassDB::bind_method("initialize_appodeal", &Appodealplugin::initialize_appodeal);
@@ -69,6 +139,14 @@ void Appodealplugin::_bind_methods() {
     ClassDB::bind_method("set_banner_animation_enabled", &Appodealplugin::set_banner_animation_enabled);
     ClassDB::bind_method("set_smart_banners_enabled", &Appodealplugin::set_smart_banners_enabled);
     
+    // Interstitial ad methods
+    ClassDB::bind_method("show_interstitial", &Appodealplugin::show_interstitial);
+    ClassDB::bind_method("is_interstitial_ready", &Appodealplugin::is_interstitial_ready);
+    
+    // Rewarded ad methods
+    ClassDB::bind_method("show_rewarded", &Appodealplugin::show_rewarded);
+    ClassDB::bind_method("is_rewarded_ready", &Appodealplugin::is_rewarded_ready);
+    
     // Utility methods
     ClassDB::bind_method("check_appodeal", &Appodealplugin::check_appodeal);
     ClassDB::bind_method("get_appodeal_version", &Appodealplugin::get_appodeal_version);
@@ -78,9 +156,6 @@ void Appodealplugin::_bind_methods() {
 void Appodealplugin::initialize_appodeal(const String &api_key) {
     NSString *nsApiKey = [NSString stringWithUTF8String:api_key.utf8().get_data()];
     
-    NSLog(@"Initializing Appodeal with API key: %@", nsApiKey);
-    
-    // Initialize Appodeal SDK
     [Appodeal initializeWithApiKey:nsApiKey
                             types:AppodealAdTypeInterstitial | AppodealAdTypeRewardedVideo | AppodealAdTypeBanner];
     
@@ -92,9 +167,6 @@ void Appodealplugin::initialize_appodeal(const String &api_key) {
 void Appodealplugin::initialize_appodeal_with_consent(const String &api_key, bool has_consent) {
     NSString *nsApiKey = [NSString stringWithUTF8String:api_key.utf8().get_data()];
     
-    NSLog(@"Initializing Appodeal with API key: %@ and consent: %@", nsApiKey, has_consent ? @"YES" : @"NO");
-    
-    // Initialize Appodeal SDK with consent
     [Appodeal initializeWithApiKey:nsApiKey
                             types:AppodealAdTypeInterstitial | AppodealAdTypeRewardedVideo | AppodealAdTypeBanner];
     
@@ -113,8 +185,6 @@ void Appodealplugin::log_event(const String &event_name) {
     
     NSLog(@"Logging Appodeal event: %@", nsEventName);
     [Appodeal trackEvent:nsEventName customParameters:nil];
-    
-    emit_signal("event_logged", event_name);
 }
 
 void Appodealplugin::log_event_with_parameters(const String &event_name, const Dictionary &parameters) {
@@ -161,8 +231,6 @@ void Appodealplugin::log_event_with_parameters(const String &event_name, const D
     
     NSLog(@"Logging Appodeal event: %@ with parameters: %@", nsEventName, nsParameters);
     [Appodeal trackEvent:nsEventName customParameters:nsParameters];
-    
-    emit_signal("event_logged", event_name);
 }
 
 void Appodealplugin::log_revenue_event(const String &currency, double amount) {
@@ -374,6 +442,58 @@ void Appodealplugin::set_smart_banners_enabled(bool enabled) {
     
     NSLog(@"Setting smart banners: %@", enabled ? @"YES" : @"NO");
     [Appodeal setSmartBannersEnabled:enabled];
+}
+
+// Interstitial ad methods
+void Appodealplugin::show_interstitial() {
+    if (!initialized) {
+        NSLog(@"Appodeal not initialized. Cannot show interstitial");
+        emit_signal("interstitial_failed", false);
+        return;
+    }
+    NSLog(@"Showing interstitial ad");
+    BOOL success = [Appodeal showAd:AppodealShowStyleInterstitial rootViewController:(UIViewController *)[AppDelegate viewController]];
+    if (success) {
+        NSLog(@"Interstitial ad shown successfully");
+        emit_signal("interstitial_shown", true);
+        // Note: To emit 'interstitial_closed' and 'interstitial_clicked', you should implement the AppodealInterstitialDelegate and forward those callbacks here.
+    } else {
+        NSLog(@"Failed to show interstitial ad");
+        emit_signal("interstitial_failed", false);
+    }
+}
+
+bool Appodealplugin::is_interstitial_ready() {
+    if (!initialized) {
+        return false;
+    }
+    return [Appodeal isReadyForShowWithStyle:AppodealShowStyleInterstitial];
+}
+
+// Rewarded ad methods
+void Appodealplugin::show_rewarded() {
+    if (!initialized) {
+        NSLog(@"Appodeal not initialized. Cannot show rewarded");
+        emit_signal("rewarded_failed", false);
+        return;
+    }
+    NSLog(@"Showing rewarded ad");
+    BOOL success = [Appodeal showAd:AppodealShowStyleRewardedVideo rootViewController:(UIViewController *)[AppDelegate viewController]];
+    if (success) {
+        NSLog(@"Rewarded ad shown successfully");
+        emit_signal("rewarded_shown", true);
+        // Note: To emit 'rewarded_closed', 'rewarded_clicked', and 'rewarded_finished', you should implement the AppodealRewardedVideoDelegate and forward those callbacks here.
+    } else {
+        NSLog(@"Failed to show rewarded ad");
+        emit_signal("rewarded_failed", false);
+    }
+}
+
+bool Appodealplugin::is_rewarded_ready() {
+    if (!initialized) {
+        return false;
+    }
+    return [Appodeal isReadyForShowWithStyle:AppodealShowStyleRewardedVideo];
 }
 
 void Appodealplugin::check_appodeal() {

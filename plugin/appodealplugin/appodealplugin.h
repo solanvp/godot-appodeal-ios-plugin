@@ -10,6 +10,8 @@
 
 #include "core/object/object.h"
 
+@class AppodealRewardedDelegateBridge;
+
 class Appodealplugin: public Object {
     
     GDCLASS(Appodealplugin, Object);
@@ -42,6 +44,16 @@ public:
     bool is_banner_shown();
     void set_banner_animation_enabled(bool enabled);
     void set_smart_banners_enabled(bool enabled);
+
+    // Interstitial ad methods
+    void show_interstitial();
+    bool is_interstitial_ready();
+    // void hide_interstitial(); // Not typically supported by Appodeal
+
+    // Rewarded ad methods
+    void show_rewarded();
+    bool is_rewarded_ready();
+    // void hide_rewarded(); // Not typically supported by Appodeal
     
     // Utility methods
     void check_appodeal();
@@ -60,6 +72,7 @@ private:
     bool initialized;
     bool banner_loaded;
     bool banner_shown;
+    AppodealRewardedDelegateBridge *rewarded_delegate_bridge;
 };
 
 #endif

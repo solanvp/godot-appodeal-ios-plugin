@@ -1,5 +1,5 @@
 plugin/bin/*
 *.d
 *.o
-*.sconsign.dblite
+*dblite
 plugin/sdk/*
